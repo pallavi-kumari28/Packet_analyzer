@@ -41,8 +41,33 @@ User Traffic (PCAP) → [DPI Engine] → Filtered Traffic (PCAP)
 ```
 
 ---
+## 2.## 🚀 Extension: Bandwidth Throttling
 
-## 2. Networking Background
+This fork extends the original DPI engine with **per-flow bandwidth throttling**
+using a token-bucket rate limiting algorithm — the same QoS technique used by
+real ISPs to slow down specific apps instead of blocking them outright.
+
+### What's new
+- `include/token_bucket.h` — Token bucket rate limiter
+- Per-flow throttling support in the `Rules` and `FlowEntry` classes
+- New CLI flag: `--throttle-app <AppName> <KB/s>`
+
+### Usage
+\`\`\`bash
+./dpi_engine input.pcap output.pcap --throttle-app YouTube 50
+# Throttles YouTube to 50 KB/sec instead of blocking it completely
+\`\`\`
+
+### How it works
+Each throttled flow gets its own independent token bucket. Tokens refill
+continuously at the configured rate; a packet can only be forwarded
+immediately if enough tokens are available, otherwise it's delayed until
+the bucket refills. This stays thread-safe across the multi-threaded
+Fast Path architecture without extra locking, since consistent hashing
+guarantees the same flow always routes to the same FP thread.
+
+---
+## 3. Networking Background
 
 ### The Network Stack (Layers)
 

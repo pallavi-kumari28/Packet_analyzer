@@ -64,8 +64,8 @@ public:
         uint64_t connections_tracked;
         uint64_t sni_extractions;
         uint64_t classification_hits;
-    };
-    
+        uint64_t packets_throttled;
+    };    
     FPStats getStats() const;
     
     // Get FP ID
@@ -93,8 +93,9 @@ private:
     std::atomic<uint64_t> packets_processed_{0};
     std::atomic<uint64_t> packets_forwarded_{0};
     std::atomic<uint64_t> packets_dropped_{0};
-    std::atomic<uint64_t> sni_extractions_{0};
+   std::atomic<uint64_t> sni_extractions_{0};
     std::atomic<uint64_t> classification_hits_{0};
+    std::atomic<uint64_t> packets_throttled_{0};
     
     // Thread control
     std::atomic<bool> running_{false};

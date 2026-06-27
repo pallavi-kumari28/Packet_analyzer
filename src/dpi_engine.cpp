@@ -374,6 +374,20 @@ void DPIEngine::unblockApp(const std::string& app_name) {
         }
     }
 }
+void DPIEngine::throttleApp(AppType app, double rate_bytes_per_sec) {
+    if (rule_manager_) {
+        rule_manager_->addThrottleRule(app, rate_bytes_per_sec);
+    }
+}
+
+void DPIEngine::throttleApp(const std::string& app_name, double rate_bytes_per_sec) {
+    for (int i = 0; i < static_cast<int>(AppType::APP_COUNT); i++) {
+        if (appTypeToString(static_cast<AppType>(i)) == app_name) {
+            throttleApp(static_cast<AppType>(i), rate_bytes_per_sec);
+            return;
+        }
+    }
+}
 
 void DPIEngine::blockDomain(const std::string& domain) {
     if (rule_manager_) {

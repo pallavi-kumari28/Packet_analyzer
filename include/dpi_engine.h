@@ -97,7 +97,10 @@ public:
     // Unblock an application
     void unblockApp(AppType app);
     void unblockApp(const std::string& app_name);
-    
+
+    // --- Throttling extension ---
+    void throttleApp(AppType app, double rate_bytes_per_sec);
+    void throttleApp(const std::string& app_name, double rate_bytes_per_sec);
     // Block a domain
     void blockDomain(const std::string& domain);
     

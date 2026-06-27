@@ -8,6 +8,8 @@
 #include <vector>
 #include <atomic>
 #include <optional>
+#include "token_bucket.h"
+#include <memory>
 
 namespace DPI {
 
@@ -125,6 +127,9 @@ struct Connection {
     std::chrono::steady_clock::time_point last_seen;
     
     PacketAction action = PacketAction::FORWARD;
+// --- Throttling extension ---
+    bool throttled = false;
+    std::shared_ptr<TokenBucket> bucket = nullptr;
     
     // For TCP state tracking
     bool syn_seen = false;

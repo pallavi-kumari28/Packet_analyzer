@@ -2,6 +2,7 @@
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+#include <thread>
 
 namespace DPI {
 
@@ -216,7 +217,7 @@ PacketAction FastPathProcessor::checkRules(const PacketJob& job, Connection* con
         // Log the block
         std::ostringstream ss;
         ss << "[FP" << fp_id_ << "] BLOCKED packet: ";
-        
+
         switch (block_reason->type) {
             case RuleManager::BlockReason::IP:
                 ss << "IP " << block_reason->detail;
@@ -231,15 +232,37 @@ PacketAction FastPathProcessor::checkRules(const PacketJob& job, Connection* con
                 ss << "Port " << block_reason->detail;
                 break;
         }
-        
+
         std::cout << ss.str() << std::endl;
-        
+
         // Mark connection as blocked
         conn_tracker_.blockConnection(conn);
-        
+
         return PacketAction::DROP;
     }
-    
+
+    // ========== Bandwidth Throttling ==========
+    if (rule_manager_->isThrottled(conn->app_type)) {
+        conn->throttled = true;
+
+        // Lazily create a token bucket the first time this connection is throttled
+        if (!conn->bucket) {
+            double rate = rule_manager_->getThrottleRate(conn->app_type);
+            double burst_capacity = rate * 0.5; // allow 0.5 sec worth of burst
+            conn->bucket = std::make_shared<TokenBucket>(rate, burst_capacity);
+        }
+
+        size_t pkt_size = job.payload_length > 0 ? job.payload_length : job.data.size();
+
+        if (!conn->bucket->tryConsume(pkt_size)) {
+            // Not enough tokens yet — delay until the bucket refills
+            int64_t delay_ms = conn->bucket->millisUntilAvailable(pkt_size);
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+            conn->bucket->tryConsume(pkt_size);
+            packets_throttled_++;
+        }
+    }
+
     return PacketAction::FORWARD;
 }
 
@@ -284,9 +307,9 @@ FastPathProcessor::FPStats FastPathProcessor::getStats() const {
     stats.connections_tracked = conn_tracker_.getActiveCount();
     stats.sni_extractions = sni_extractions_.load();
     stats.classification_hits = classification_hits_.load();
+    stats.packets_throttled = packets_throttled_.load();
     return stats;
 }
-
 // ============================================================================
 // FPManager Implementation
 // ============================================================================

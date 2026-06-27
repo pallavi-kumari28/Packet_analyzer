@@ -1,6 +1,6 @@
 // Multi-threaded DPI Engine - Fixed Version
 // Architecture: Reader -> LB threads -> FP threads -> Output
-
+#include "token_bucket.h"
 #include <iostream>
 #include <fstream>
 #include <thread>
@@ -102,8 +102,9 @@ struct FlowEntry {
     uint64_t bytes = 0;
     bool blocked = false;
     bool classified = false;
+    bool throttled = false;
+    std::shared_ptr<TokenBucket> bucket = nullptr;
 };
-
 // =============================================================================
 // Blocking Rules
 // =============================================================================
@@ -133,7 +134,7 @@ public:
         std::cout << "[Rules] Blocked domain: " << domain << "\n";
     }
     
-    bool isBlocked(uint32_t src_ip, AppType app, const std::string& sni) const {
+bool isBlocked(uint32_t src_ip, AppType app, const std::string& sni) const {
         std::lock_guard<std::mutex> lock(mutex_);
         if (blocked_ips_.count(src_ip)) return true;
         if (blocked_apps_.count(app)) return true;
@@ -143,8 +144,33 @@ public:
         return false;
     }
 
+    void throttleApp(const std::string& app, double rate_bytes_per_sec) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (int i = 0; i < static_cast<int>(AppType::APP_COUNT); i++) {
+            if (appTypeToString(static_cast<AppType>(i)) == app) {
+                throttle_rates_[static_cast<AppType>(i)] = rate_bytes_per_sec;
+                std::cout << "[Rules] Throttled app: " << app
+                          << " to " << rate_bytes_per_sec << " bytes/sec\n";
+                return;
+            }
+        }
+        std::cerr << "[Rules] Unknown app: " << app << "\n";
+    }
+
+    bool isThrottled(AppType app) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return throttle_rates_.count(app) > 0;
+    }
+
+    double getThrottleRate(AppType app) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = throttle_rates_.find(app);
+        return it != throttle_rates_.end() ? it->second : 0.0;
+    }
+
 private:
-    static uint32_t parseIP(const std::string& ip) {
+    std::unordered_map<AppType, double> throttle_rates_;
+static uint32_t parseIP(const std::string& ip) {
         uint32_t result = 0;
         int octet = 0, shift = 0;
         for (char c : ip) {
@@ -389,6 +415,7 @@ public:
     void blockIP(const std::string& ip) { rules_.blockIP(ip); }
     void blockApp(const std::string& app) { rules_.blockApp(app); }
     void blockDomain(const std::string& dom) { rules_.blockDomain(dom); }
+void throttleApp(const std::string& app, double rate_bytes_per_sec) { rules_.throttleApp(app, rate_bytes_per_sec); }
     
     bool process(const std::string& input_file, const std::string& output_file) {
         // Open input
@@ -591,21 +618,19 @@ void printUsage(const char* prog) {
     std::cout << R"(
 DPI Engine v2.0 - Multi-threaded Deep Packet Inspection
 ========================================================
-
 Usage: )" << prog << R"( <input.pcap> <output.pcap> [options]
-
 Options:
   --block-ip <ip>        Block source IP
   --block-app <app>      Block application (YouTube, Facebook, etc.)
   --block-domain <dom>   Block domain (substring match)
+  --throttle-app <app> <KBps>  Throttle application bandwidth instead of blocking
   --lbs <n>              Number of load balancer threads (default: 2)
   --fps <n>              FP threads per LB (default: 2)
-
 Example:
   )" << prog << R"( capture.pcap filtered.pcap --block-app YouTube --block-ip 192.168.1.50
+  )" << prog << R"( capture.pcap filtered.pcap --throttle-app YouTube 50
 )";
 }
-
 int main(int argc, char* argv[]) {
     if (argc < 3) {
         printUsage(argv[0]);
@@ -617,12 +642,17 @@ int main(int argc, char* argv[]) {
     
     DPIEngine::Config cfg;
     std::vector<std::string> block_ips, block_apps, block_domains;
-    
+    std::vector<std::pair<std::string, double>> throttle_apps;
     for (int i = 3; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--block-ip" && i + 1 < argc) block_ips.push_back(argv[++i]);
         else if (arg == "--block-app" && i + 1 < argc) block_apps.push_back(argv[++i]);
         else if (arg == "--block-domain" && i + 1 < argc) block_domains.push_back(argv[++i]);
+        else if (arg == "--throttle-app" && i + 2 < argc) {
+            std::string app_name = argv[++i];
+            double rate_kbps = std::stod(argv[++i]);
+            throttle_apps.push_back({app_name, rate_kbps * 1024.0}); // KB/s -> bytes/sec
+        }
         else if (arg == "--lbs" && i + 1 < argc) cfg.num_lbs = std::stoi(argv[++i]);
         else if (arg == "--fps" && i + 1 < argc) cfg.fps_per_lb = std::stoi(argv[++i]);
     }
@@ -632,8 +662,9 @@ int main(int argc, char* argv[]) {
     for (const auto& ip : block_ips) engine.blockIP(ip);
     for (const auto& app : block_apps) engine.blockApp(app);
     for (const auto& dom : block_domains) engine.blockDomain(dom);
-    
-    if (!engine.process(input, output)) {
+    for (const auto& [app, rate] : throttle_apps) engine.throttleApp(app, rate);
+
+       if (!engine.process(input, output)) {
         return 1;
     }
     

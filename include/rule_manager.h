@@ -82,13 +82,26 @@ public:
     
     // Unblock a port
     void unblockPort(uint16_t port);
-    
-    // Check if port is blocked
+// Check if port is blocked
     bool isPortBlocked(uint16_t port) const;
-    
+
+    // ========== Bandwidth Throttling ==========
+
+    // Throttle an app to a given rate (bytes per second) instead of blocking it
+    void addThrottleRule(AppType app, double rate_bytes_per_sec);
+
+    // Remove throttling for an app
+    void removeThrottleRule(AppType app);
+
+    // Check if an app is throttled
+    bool isThrottled(AppType app) const;
+
+    // Get the configured throttle rate (bytes/sec) for an app, 0 if none
+    double getThrottleRate(AppType app) const;
+
     // ========== Combined Check ==========
     
-    // Check if a packet/connection should be blocked based on all rules
+        // Check if a packet/connection should be blocked based on all rules
     // Returns the reason if blocked, nullopt if allowed
     struct BlockReason {
         enum Type { IP, APP, DOMAIN, PORT } type;
@@ -137,6 +150,8 @@ private:
     
     mutable std::shared_mutex port_mutex_;
     std::unordered_set<uint16_t> blocked_ports_;
+mutable std::shared_mutex throttle_mutex_;
+    std::unordered_map<AppType, double> throttle_rates_;
     
     // Helper: Convert IP string to uint32
     static uint32_t parseIP(const std::string& ip);

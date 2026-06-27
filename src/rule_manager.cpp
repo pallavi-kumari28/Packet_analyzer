@@ -201,6 +201,29 @@ bool RuleManager::isPortBlocked(uint16_t port) const {
     std::shared_lock<std::shared_mutex> lock(port_mutex_);
     return blocked_ports_.count(port) > 0;
 }
+void RuleManager::addThrottleRule(AppType app, double rate_bytes_per_sec) {
+    std::unique_lock<std::shared_mutex> lock(throttle_mutex_);
+    throttle_rates_[app] = rate_bytes_per_sec;
+    std::cout << "[RuleManager] Throttled app: " << appTypeToString(app)
+               << " to " << rate_bytes_per_sec << " bytes/sec" << std::endl;
+}
+
+void RuleManager::removeThrottleRule(AppType app) {
+    std::unique_lock<std::shared_mutex> lock(throttle_mutex_);
+    throttle_rates_.erase(app);
+    std::cout << "[RuleManager] Removed throttle for app: " << appTypeToString(app) << std::endl;
+}
+
+bool RuleManager::isThrottled(AppType app) const {
+    std::shared_lock<std::shared_mutex> lock(throttle_mutex_);
+    return throttle_rates_.count(app) > 0;
+}
+
+double RuleManager::getThrottleRate(AppType app) const {
+    std::shared_lock<std::shared_mutex> lock(throttle_mutex_);
+    auto it = throttle_rates_.find(app);
+    return (it != throttle_rates_.end()) ? it->second : 0.0;
+}
 
 // ============================================================================
 // Combined Check
